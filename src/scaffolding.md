@@ -50,8 +50,10 @@ python utils/build.py --preset mini --build-type release --bootloader no
 
 You may need to change some of these values for the machine you're working on and if you intend on loading the firmware using a USB stick or directly through a probe connected to the board - which is the way we will do it here.
 
-> [!TIP]
-> Why not check if you can load the buddy firmware by running:
+> [!IMPORTANT]
+> You will need to copy over the `firmware.bbf` to a USB stick and have it inserted into your device. This contains the assets for the GUI and it may need to pull them from time to time and load it back into the memory on the device. The firmware will panic otherwise.
+>
+> With that plugged in, why not check if you can load the buddy firmware by running:
 > ```bash
 > probe-rs run --chip STM32F407VG ./buddy/build/mini_release_noboot/firmware
 > ```

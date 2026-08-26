@@ -15,3 +15,4 @@
 
 ### Hooking up the STM32 Probe
 
+### USB stick
