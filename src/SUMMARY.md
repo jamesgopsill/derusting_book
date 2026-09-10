@@ -1,8 +1,8 @@
 # Summary
 
-- [About](./about.md)
-  - [Introduction](./introduction.md)
-  - [Background](./background.md)
+<!-- - [About](./about.md) -->
+- [Introduction](./introduction.md)
+<!--  - [Background](./background.md) -->
 
 - [Project Set-Up](./setup.md)
   - [Buddy Firmware](./buddy.md)
