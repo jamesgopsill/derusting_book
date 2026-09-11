@@ -425,11 +425,3 @@ You should see a SUCCESS from the build process and the probe programming the de
 19:19:10.993: 9.973s [ERROR - Network:11] mdns_resp_remove_netif: Not an active netif
 ...
 ```
-
-
-
-### Removing the Appendix
-
-### Hooking up the STM32 Probe
-
-### Using `probe-rs`

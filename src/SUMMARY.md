@@ -4,6 +4,8 @@
 - [Introduction](./introduction.md)
 <!--  - [Background](./background.md) -->
 
+- [Getting Started](./getting_started.md)
+
 - [Project Set-Up](./setup.md)
   - [Buddy Firmware](./buddy.md)
   - [Prerequisites](./prerequisites.md)
@@ -47,6 +49,6 @@
 ---
 
 [About the Author](./author.md)
-[Sponsors](./sponsors.md)
+[Acknowledgements](./sponsors.md)
 [Publications](./publications.md)
 [Other Projects](./projects.md)

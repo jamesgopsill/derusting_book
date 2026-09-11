@@ -4,6 +4,10 @@ Welcome to the **derusting** book. Derusting is a **de**centralised t**rust**ed 
 
 This book takes you through the journey of how we've taken our research and implemented on Prusa's Additive Manufacturing machines. Machines that we are using in our labs to study decentralises trusted production system architectures and production agent intelligence.
 
+<p align="center">
+  <img src="./assets/lab.png" style="max-height: 400px;" alt="Breaking the Appendix">
+</p>
+
 ## Why Decentralised?
 
 ![Centralised vs. Decentralised Services](./assets/service_architecture.png)
@@ -36,6 +40,15 @@ Rust is a modern system's programming language known for its memory safety and z
 
 ## Structure of the Book
 
+The book is structured as follows:
+
+- **Getting Started** - Provides the step to jump right in with our pre-compiled firmware for the Prusa Buddy.
+- **Project Set-Up** - Step-by-step guide in setting up a project that implements a Rust library on top of the Prusa Firmware.
+- **Decentralisation** - Step-by-step guide showing how to bind with the necessary C/C++ libraries for decentralised sharing of work.
+- **Monitoring** - Creating a Rust binary to listen in on the network to study machine communication.
+- **Building Trust** - Coming soon...
+- **Derusting Digital Twin** - Coming soon...
+
 ## Support
 
 
@@ -49,4 +62,3 @@ If this book and its concepts supports you in anyway then please consider donati
 
 And feel free to reach out to me if you want me to spare some time, come visit, and consult on any of your decentralised manufacturing systems projects.
 
-<iframe src="https://github.com/sponsors/jamesgopsill/card" title="Sponsor jamesgopsill" height="100" width="100%" style="border: 0; color-scheme: light; mix-blend-mode: multiply;"></iframe> 
