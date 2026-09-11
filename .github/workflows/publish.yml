@@ -11,8 +11,8 @@ jobs:
         with:
           ref: main
       - uses: cargo-bins/cargo-binstall@main
-      - name: "Install trunk"
-        run: cargo binstall mdbooks
+      - name: "Install mdbook"
+        run: cargo binstall mdbook
       - name: "Build and Deploy"
         run: mdbook build
       - uses: actions/upload-pages-artifact@v3
