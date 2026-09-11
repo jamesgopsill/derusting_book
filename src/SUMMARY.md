@@ -26,6 +26,11 @@
     - [File Upload](./upload.md)
   - [Updating the UI](./ui.md)
 
+- [Monitoring](./monitoring.md)
+
+- [Building Trust](./trust.md)
+
+- [Derusting Digital Twin](./digital_twin.md)
 <!-- TODO: Coming Soon
  - [Building Trust](./trust.md)
   - [Encrypted Gcode](./encrypted_gcode.md)
