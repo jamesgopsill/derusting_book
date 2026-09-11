@@ -10,10 +10,12 @@
   - [Scaffolding](./scaffolding.md)
 
 - [Decentralisation](./decentralisation.md)
-  - [Embassy Async Runtime in FreeRTOS](./embassy.md)
-  - [Binding LWIP UDP](./lwip_udp.md)
-  - [Binding LWIP TCP](./lwip_tcp.md)
-  - [Binding ChanFS](./chanfs.md)
+  - [Binding with Buddy](./binding.md)
+    - [Embassy Async Runtime in FreeRTOS](./embassy.md)
+    - [LWIP UDP](./lwip_udp.md)
+    - [LWIP TCP](./lwip_tcp.md)
+    - [FS](./fs.md)
+    - [Marlin](./marlin,md)
   - [Gossiping](./gossip.md)
     - [Address Book](./address_book.md)
     - [File Share](./file_share.md)
@@ -24,7 +26,8 @@
     - [File Upload](./upload.md)
   - [Updating the UI](./ui.md)
 
-- [Building Trust](./trust.md)
+<!-- TODO: Coming Soon
+ - [Building Trust](./trust.md)
   - [Encrypted Gcode](./encrypted_gcode.md)
   - [Digital Wallets](./digital_wallet.md)
   - [Signing Data](./signing.md)
@@ -34,8 +37,11 @@
   - [Machine Agent](./agent.md)
   - [Monte-Carlo](./monte-carlo.md)
   - [Analysing Results](./analysis.md)
+-->
 
 ---
 
 [About the Author](./author.md)
 [Sponsors](./sponsors.md)
+[Publications](./publications.md)
+[Other Projects](./projects.md)
