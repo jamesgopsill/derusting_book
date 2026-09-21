@@ -2,3 +2,6 @@
 title = "Derusting"
 authors = ["James Gopsill"]
 language = "en"
+
+[output.html.playground]
+runnable = false
