@@ -338,7 +338,13 @@ We should now be good to go to build and flash the firmware onto a Prusa machine
 
 ### The Build Script
 
-Building the fimrware requires us to build our firmware, patch a couple of files in the buddy firmware so it knows about our library and to call it during boot, copy our lib folder and lib, and then build the buddy firmware. The following bash scripts handles all of this for us.
+Building the fimrware requires us to build our firmware, patch a couple of files in the buddy firmware so it knows about our library and to call it during boot, copy our lib folder and lib, and then build the buddy firmware. The following bash scripts handles all of this for us. Keep them together in a `scripts` directory at the repo root:
+
+```bash
+mkdir -p scripts
+```
+
+Create `scripts/build_firmware.sh` as:
 
 ```bash
 cargo build --release || {
@@ -388,7 +394,7 @@ echo "BUILD FINISHED"
 
 ## Flashing onto the device
 
-We can now create a script to flash the device on a successful build. Create a `flash.sh` that as:
+We can now create a script to flash the device on a successful build. Create `scripts/flash.sh` that as:
 
 ```bash
 probe-rs run --chip STM32F407VG ./buddy/build/mini_release_noboot/firmware
@@ -396,18 +402,18 @@ probe-rs run --chip STM32F407VG ./buddy/build/mini_release_noboot/firmware
 
 which will do the job of erasing and programming our buddy board with the new firmware.
 
-We can also create a `build_and_flash.sh` script that combines the two and only flashes the device on a successful build.
+We can also create a `scripts/build_and_flash.sh` script that combines the two and only flashes the device on a successful build. Since both scripts always run from the repo root (not from inside `scripts/` itself), it needs to reference its siblings with the `scripts/` prefix too:
 
 ```bash
-if bash build_firmware.sh 2>&1 | tee /dev/stderr | grep -q "SUCCESS"; then
-  bash flash.sh
+if bash scripts/build_firmware.sh 2>&1 | tee /dev/stderr | grep -q "SUCCESS"; then
+  bash scripts/flash.sh
 fi
 ```
 
 With that all done. Let's give it a go:
 
 ```bash
-bash build_and_flash.sh
+bash scripts/build_and_flash.sh
 ```
 
 This may take a bit of time on the first build so make sure you have a coffee/tea at the ready.

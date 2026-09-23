@@ -137,7 +137,7 @@ and in the button table itself:
 
 The header text is also relabelled from the Prusa version string to `DERUSTING`, so you can tell at a glance you're running our firmware rather than stock Buddy.
 
-These two files aren't part of the Rust crate — they're firmware assets, patched in at build time. `build_firmware.sh` copies them over the stock ones just before the Buddy build runs:
+These two files aren't part of the Rust crate — they're firmware assets, patched in at build time. `scripts/build_firmware.sh` copies them over the stock ones just before the Buddy build runs:
 
 ```bash
 # UI elements
@@ -176,7 +176,7 @@ For this chapter's stage gate, you don't need the ledger at all — a single man
 Rebuild and flash:
 
 ```bash
-bash build_and_flash.sh
+bash scripts/build_and_flash.sh
 ```
 
 **1. The ONLINE/OFFLINE toggle.** On the home screen you should see `DERUSTING` in the header, and the button that's normally labelled `Print` now reads `OFFLINE`. Tap it — it should flip to `ONLINE` and back each time you press it, with no code changes needed beyond what's above. This alone confirms `derusting_ready_flag` and the UI patch are wired correctly.

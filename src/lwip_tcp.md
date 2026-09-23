@@ -184,7 +184,7 @@ async fn embassy_main(spawner: Spawner) {
 Rebuild and flash:
 
 ```bash
-bash build_and_flash.sh
+bash scripts/build_and_flash.sh
 ```
 
 Find the machine's IP address (the log lines from the [LWIP UDP](./lwip_udp.md) chapter will show it), then browse to `http://[IP_ADDRESS_OF_MACHINE]:8080`. You should be served the derusting upload page:
@@ -202,6 +202,9 @@ In the log you'll see:
 [INFO  - derusting:0] Handling TCP Connection
 [INFO  - derusting:0] / GET request received
 ```
+
+> [!TIP]
+> `Handling TCP Connection` (and, once you get to the `PUT` branch, `/ PUT request received`) is now also broadcast over UDP as a `Log` message, not just printed to this local console — see [Address Book](./address_book.md)'s `Message::send_log` and [Monitoring](./monitoring.md) if you want to watch it from another machine on the network.
 
 > [!NOTE]
 > Don't try submitting a job through the form just yet — the `PUT` handler needs the filesystem work from the next chapter before it can save anything, and there's a known intermittent `NS_ERROR_NET_RESET` some browsers report on upload that's still being tracked down. `GET /` returning the page is the whole stage gate here.

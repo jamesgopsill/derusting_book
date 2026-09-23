@@ -8,7 +8,7 @@ Worth being upfront about scope here: as of this chapter, the **only** UI patch 
 
 ## The pattern: patch, don't fork
 
-Rather than maintaining a diverged copy of the whole Buddy GUI, derusting takes the smallest possible slice — one screen — and overwrites just that file at build time. [Scaffolding](./scaffolding.md) already set up the mechanism for patching C++ source into the `buddy` submodule; `build_firmware.sh` does the same thing for GUI files, just with `rsync` instead of `sed`:
+Rather than maintaining a diverged copy of the whole Buddy GUI, derusting takes the smallest possible slice — one screen — and overwrites just that file at build time. [Scaffolding](./scaffolding.md) already set up the mechanism for patching C++ source into the `buddy` submodule; `scripts/build_firmware.sh` does the same thing for GUI files, just with `rsync` instead of `sed`:
 
 ```bash
 # UI elements
@@ -18,7 +18,7 @@ rsync -c assets/screen_home.cpp buddy/src/gui/screen_home.cpp
 
 Because `.gitmodules` sets `ignore = all` on the `buddy` submodule (see [Scaffolding](./scaffolding.md)), these overwritten files never show up as changes to commit inside `buddy/` — the *source of truth* is always `assets/screen_home.cpp`, and every build re-applies it fresh. If Prusa updates `screen_home.cpp` upstream, you pull the submodule forward, diff their new version against your patched one, and update `assets/screen_home.cpp` by hand — there's no merge conflict to resolve, because the patched file just gets stamped over on the next build regardless.
 
-The pattern generalises to any other screen you might want to touch: copy the stock file from `buddy/src/gui/` into `assets/`, make your changes, and add a matching `rsync` line to `build_firmware.sh`.
+The pattern generalises to any other screen you might want to touch: copy the stock file from `buddy/src/gui/` into `assets/`, make your changes, and add a matching `rsync` line to `scripts/build_firmware.sh`.
 
 ## What a real screen file looks like
 

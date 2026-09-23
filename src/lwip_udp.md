@@ -166,7 +166,7 @@ pub async fn heartbeat(udp: &'static UdpSocket<UDP_CHANNEL_SIZE>) {
 Rebuild, flash, and connect your machine to the network:
 
 ```bash
-bash build_and_flash.sh
+bash scripts/build_and_flash.sh
 ```
 
 Once DHCP assigns an address you should see:

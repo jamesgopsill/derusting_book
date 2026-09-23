@@ -31,7 +31,7 @@ Back in [File Upload](./upload.md), we left a placeholder in `handle_conn` for a
 ```rust
 if info.guid.is_none() {
     append_to_ledger(guid, address_book, ledger, udp).await;
-    distribute_file(guid, address_book).await;
+    distribute_file(guid, address_book, udp).await;
 }
 ```
 
@@ -144,6 +144,8 @@ pub async fn manage_ledger(
                     Ok(_) => {
                         marlin::set_offline();
                         ledger_state.ledger.jobs.remove(&guid);
+                        let msg = format!("Job Accepted: {guid}");
+                        Message::send_log(&msg, udp).await;
                     }
                     Err(e) => log_error!("Print Error: {e}"),
                 }
@@ -217,6 +219,6 @@ with the second line repeating every 5 seconds after that — proof the token-ri
 
 1. [File Share](./file_share.md)'s log lines as the file gets distributed.
 2. The job appearing in the ledger's `jobs` set (via `append_to_ledger` or a `NewJob` broadcast).
-3. Whichever machine happens to own the ledger *and* is ready *and* is idle picking the job up and logging `Gcode from Rust: M32 /usb/<guid>.gcode` — the printer should visibly home and start a dry run.
+3. Whichever machine happens to own the ledger *and* is ready *and* is idle picking the job up and logging `Gcode from Rust: M32 /usb/<guid>.gcode` — the printer should visibly home and start a dry run. That machine also broadcasts `Log("Job Accepted: <guid>")` over UDP the moment the print starts successfully, visible via [Monitoring](./monitoring.md).
 
 That's the whole system working together: an upload on one machine ends up dry-printed on whichever machine's turn it was, with no central coordinator anywhere in the loop.

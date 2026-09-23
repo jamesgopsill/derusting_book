@@ -148,6 +148,9 @@ Upload a small `.gcode` file through the portal (from [Submission Portal](./port
 (exact chunk sizes and count depend on the file size and how lwIP happened to segment it). Power the machine down, pull the USB stick, and check on your PC — you should find a `<guid>.gcode` file (not `.partial`) containing exactly what you uploaded.
 
 > [!TIP]
+> `/ PUT request received` is now also broadcast over UDP as a `Log` message, not just printed to this local console — see [Address Book](./address_book.md)'s `Message::send_log` and [Monitoring](./monitoring.md) if you want to watch it from another machine on the network.
+
+> [!TIP]
 > If an upload seems to hang or the browser reports an error partway through, it's a known rough edge: some browsers intermittently report `NS_ERROR_NET_RESET` mid-upload against this handler. It's been narrowed down enough to rule out `is_gcode`/`Content-Type` detection as the cause (see the note above), but the underlying trigger — something in how a `TcpConnection` gets torn down mid-transfer — is still being investigated as of this writing. If you hit it, the safest recovery is simply to retry the upload.
 
 With a file safely on disk, [File Share](./file_share.md) covers pushing a copy of it out to every other machine on the network, and [Job Ledger](./ledger.md) covers who actually gets to print it.

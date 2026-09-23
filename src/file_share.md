@@ -9,29 +9,37 @@ Picking up right where [File Upload](./upload.md) left off — recall the placeh
 ```rust
 if info.guid.is_none() {
     // Updating the job ledger too is covered next, in Job Ledger.
-    distribute_file(guid, address_book).await;
+    distribute_file(guid, address_book, udp).await;
 }
 ```
 
-The `info.guid.is_none()` check is what stops this from looping forever: a genuinely new upload from a browser carries no `guid` header, so its `PutInfo::guid` is `None` and a fresh UUID is minted for it. But when *this* machine forwards the file on to a peer (below), it includes that UUID as a `guid:` header — so when the peer receives it, `info.guid` is `Some(..)`, and it knows not to distribute the file any further itself.
+The `info.guid.is_none()` check is what stops this from looping forever: a genuinely new upload from a browser carries no `guid` header, so its `PutInfo::guid` is `None` and a fresh UUID is minted for it. But when *this* machine forwards the file on to a peer (below), it includes that UUID as a `guid:` header — so when the peer receives it, `info.guid` is `Some(..)`, and it knows not to distribute the file any further itself. That recognition is also broadcast over UDP as a `Log` message — `"Receiving file from machine"` — so watching [Monitoring](./monitoring.md) on a third device lets you tell an inbound share apart from a genuinely new upload, even though both look identical in the local serial log (`/ PUT request received` either way).
 
 ## Pushing the file out
 
 `distribute_file` walks the current address book and PUTs the job file to every peer in it:
 
 ```rust
-async fn distribute_file<const N1: usize>(guid: Uuid, address_book: &AddressBook<N1>) {
+async fn distribute_file<const N1: usize, const N2: usize>(
+    guid: Uuid,
+    address_book: &AddressBook<N1>,
+    udp: &UdpSocket<N2>,
+) {
     let addrs = address_book.lock().await.clone();
     for (addr, _v) in addrs {
-        log_info!("Sending file to {addr}");
+        let msg = format!("PUT {guid} to {addr}:{TCP_PORT}");
+        Message::send_log(&msg, udp).await;
         if let Err(err) = put_file(guid, addr, TCP_PORT).await {
-            log_error!("Put Error: {err}");
+            let err = format!("Put Error: {err}");
+            Message::send_log(&err, udp).await;
         };
     }
 }
 ```
 
 It clones the address book first rather than holding the lock while it PUTs to (potentially several) peers, since each PUT can take a while and we don't want to block `udp_receiver` or `heartbeat` from updating the book in the meantime.
+
+Neither the per-peer progress line nor the error, if `put_file` fails, are printed to this machine's own local log any more — both go out purely as `Message::send_log` broadcasts. If you want to watch a distribution happen, [Monitoring](./monitoring.md) is where to look, not the serial console.
 
 ## The outbound PUT client
 
@@ -87,21 +95,28 @@ Each subsequent `_sent` callback calls `pump` again, which tops the staging buff
 
 You'll need two machines on the network for this one, both flashed with everything up to and including this chapter, both showing each other in their address book (see [Address Book](./address_book.md)'s "did it work" section).
 
-Upload a `.gcode` file through machine A's web form (`http://[A's IP]:8080`, from [Submission Portal](./portal.md) and [File Upload](./upload.md)). In A's log you should see:
+Upload a `.gcode` file through machine A's web form (`http://[A's IP]:8080`, from [Submission Portal](./portal.md) and [File Upload](./upload.md)). In A's local log you should see:
 
 ```
 [INFO  - derusting:0] / PUT request received
-[INFO  - derusting:0] Sending file to 192.168.x.y
 ```
 
-where `192.168.x.y` is machine B's address. On B's side, the incoming share arrives as an ordinary PUT:
+A's distribution to B no longer shows up as a local log line — it's broadcast over UDP instead. Run [Monitoring](./monitoring.md)'s listener on a PC on the same network and you should see it arrive there:
+
+```
+[192.168.x.a:9090] Message { idempotency: 0197..., payload: Log("PUT <guid> to 192.168.x.y:8080") }
+```
+
+where `192.168.x.y` is machine B's address. On B's side, the incoming share arrives as an ordinary PUT — in B's local log:
 
 ```
 [INFO  - derusting:0] on_accept
 [INFO  - derusting:0] / PUT request received
 ```
 
+and, over UDP, B also broadcasts `Log("Receiving file from machine")` the moment it recognises the `guid:` header on the incoming request.
+
 Power down B, pull its USB stick, and plug it into your PC — you should find a `<guid>.gcode` file matching the one you uploaded to A, even though you never uploaded anything to B directly.
 
 > [!NOTE]
-> If you have a third machine, C, also on the network, watch A's log more closely: it should send the file to both B and C, and neither of them should re-forward it again themselves (their `PutInfo::guid` was set from A's `guid:` header, so `info.guid.is_none()` is `false` on their end).
+> If you have a third machine, C, also on the network, watch the Monitoring listener rather than A's own serial log: you should see two separate `PUT <guid> to ...` broadcasts from A, one for B and one for C, and neither of them should re-forward the file again themselves (their `PutInfo::guid` was set from A's `guid:` header, so `info.guid.is_none()` is `false` on their end — each just logs its own `Receiving file from machine` broadcast instead).

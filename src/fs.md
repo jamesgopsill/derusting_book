@@ -139,7 +139,7 @@ That's a nice minimal confirmation that the USB stick is mounted and readable at
 Rebuild and flash:
 
 ```bash
-bash build_and_flash.sh
+bash scripts/build_and_flash.sh
 ```
 
 In the log you should see:

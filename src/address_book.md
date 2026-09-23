@@ -4,24 +4,29 @@ This chapter builds the shared foundation the rest of [Gossiping](./gossip.md) s
 
 The same envelope and receive loop also carry two more message kinds — a new-job announcement and a job-ledger handoff — covered in the next two chapters, [File Share](./file_share.md) and [Job Ledger](./ledger.md), once there's an actual job (from [Submitting Jobs](./job_submission.md)) to gossip about.
 
-## One envelope, three payloads
+## One envelope, four payloads
 
-Every message gossiped between machines — a heartbeat, a new-job announcement, or a ledger handoff — is wrapped in the same envelope, `tasks/messages.rs`'s `Message`:
+Every message gossiped between machines — a heartbeat, a new-job announcement, a ledger handoff, or a broadcast log line — is wrapped in the same envelope, `tasks/messages.rs`'s `Message`:
 
 ```rust
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Message {
+pub struct Message<'a> {
     pub idempotency: Uuid,
-    pub payload: Payload,
+    #[serde(borrow)]
+    pub payload: Payload<'a>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum Payload {
+pub enum Payload<'a> {
     Heartbeat(Heartbeat),
     NewJob(NewJob),
     Ledger(Ledger),
+    #[serde(borrow)]
+    Log(&'a str),
 }
 ```
+
+`Payload::Log` is the odd one out: unlike the other three, it borrows its string straight out of the incoming UDP packet's buffer rather than owning a copy, so `Message` and `Payload` both need a lifetime parameter tying them to that buffer.
 
 The `idempotency` field is a UUIDv7 (see [Marlin](./marlin.md)'s neighbour, `tasks/rng.rs`) generated fresh for every message — its only job is letting a receiver recognise "I've already seen this one" when the same message arrives more than once.
 
@@ -55,6 +60,8 @@ pub fn alloc<T: Serialize>(msg: T) -> Option<Self> {
 ```
 
 `heartbeat` (already introduced in [LWIP UDP](./lwip_udp.md)) is the simplest caller — `Message::send_heartbeat` wraps a one-field `Heartbeat { alive: true }` and sends it once every 2 seconds. `NewJob` and `Ledger` messages ([File Share](./file_share.md) and [Job Ledger](./ledger.md) respectively) are sent 5 times in a row instead of once, since losing one of those matters more than losing a heartbeat.
+
+A fourth sender, `Message::send_log`, broadcasts an arbitrary `&str` (repeated twice) instead of a fixed struct — it's how a machine makes one of its own internal log lines visible to the rest of the network, not just its own local serial console. [File Share](./file_share.md) and [Job Ledger](./ledger.md) both call it at a few key points; [Monitoring](./monitoring.md) is where those broadcasts actually get decoded and printed somewhere you can read them.
 
 ## Receiving, deduplicating, and updating the address book
 

@@ -184,7 +184,7 @@ unsafe extern "C" fn embassy(_pv_parameters: *mut pvParameters) -> ! {
 Rebuild and flash as before:
 
 ```bash
-bash build_and_flash.sh
+bash scripts/build_and_flash.sh
 ```
 
 Watch the device's log console. You should see, in order:
