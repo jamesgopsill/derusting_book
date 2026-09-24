@@ -31,7 +31,7 @@ The firmware builds via CMake, wrapped by a Python script (`utils/build.py`) tha
 python utils/build.py --preset mini --build-type release --bootloader no
 ```
 
-`--preset mini` selects the Prusa Mini specifically — the same tree builds firmware for every supported printer, with per-model configuration living under `utils/presets`. [Scaffolding](./scaffolding.md) walks through wiring `scripts/build_firmware.sh` around this same command, with a couple of extra flags (`-DWUI:STRING=YES`, `-DCONNECT:BOOL=OFF`, …) to enable the web UI derusting's TCP server needs and disable the parts of the stock firmware derusting doesn't want running alongside it.
+`--preset mini` selects the Prusa Mini specifically — the same tree builds firmware for every supported printer, with per-model configuration living under `utils/presets`. [Scaffolding](./scaffolding.md) walks through wiring `scripts/build_firmware.sh` around this same command, with a couple of extra flags (`-DWUI:STRING=YES`, `-DCONNECT:STRING=NO`, …) to enable the web UI derusting's TCP server needs and disable the parts of the stock firmware derusting doesn't want running alongside it.
 
 ## Next
 

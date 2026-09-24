@@ -9,7 +9,9 @@ Picking up right where [File Upload](./upload.md) left off — recall the placeh
 ```rust
 if info.guid.is_none() {
     // Updating the job ledger too is covered next, in Job Ledger.
-    distribute_file(guid, address_book, udp).await;
+    if state.files_to_distribute.try_send(guid).is_err() {
+        state.log_to_udp("Error sending on channel").await;
+    };
 }
 ```
 
@@ -17,29 +19,49 @@ The `info.guid.is_none()` check is what stops this from looping forever: a genui
 
 ## Pushing the file out
 
-`distribute_file` walks the current address book and PUTs the job file to every peer in it:
+PUTting to every peer synchronously from inside `handle_conn` would leave the uploader's browser waiting on however many peer connections there are before it gets its own response back. Instead, `distribute_file` is its own long-running task, decoupled from the upload handler by a small channel — `files_to_distribute` — that lives on `DerustingState` alongside everything else:
 
 ```rust
-async fn distribute_file<const N1: usize, const N2: usize>(
-    guid: Uuid,
-    address_book: &AddressBook<N1>,
-    udp: &UdpSocket<N2>,
-) {
-    let addrs = address_book.lock().await.clone();
-    for (addr, _v) in addrs {
-        let msg = format!("PUT {guid} to {addr}:{TCP_PORT}");
-        Message::send_log(&msg, udp).await;
-        if let Err(err) = put_file(guid, addr, TCP_PORT).await {
-            let err = format!("Put Error: {err}");
-            Message::send_log(&err, udp).await;
-        };
+pub struct DerustingState {
+    // ...
+    files_to_distribute: Channel<ThreadModeRawMutex, Uuid, 4>,
+}
+```
+
+`handle_conn` (above) just drops a `guid` onto that channel and moves on; `distribute_file` sits in a loop pulling guids back off it and doing the actual work, one job at a time, walking the current address book and PUTting the file to every peer in it:
+
+```rust
+#[embassy_executor::task(pool_size = 1)]
+pub async fn distribute_file(state: &'static DerustingState) {
+    loop {
+        let guid = state.files_to_distribute.receive().await;
+        let addrs = state.addresses.lock().await.clone();
+        for (addr, _v) in addrs {
+            let msg = format!(64; "PUT {guid} to {addr}:{TCP_PORT}").unwrap();
+            state.log_to_udp(&msg).await;
+            if let Err(err) = put_file(guid, addr, TCP_PORT).await {
+                let err = format!(64; "Put Error: {err}").unwrap();
+                state.log_to_udp(&err).await;
+            };
+        }
     }
 }
 ```
 
 It clones the address book first rather than holding the lock while it PUTs to (potentially several) peers, since each PUT can take a while and we don't want to block `udp_receiver` or `heartbeat` from updating the book in the meantime.
 
-Neither the per-peer progress line nor the error, if `put_file` fails, are printed to this machine's own local log any more — both go out purely as `Message::send_log` broadcasts. If you want to watch a distribution happen, [Monitoring](./monitoring.md) is where to look, not the serial console.
+Neither the per-peer progress line nor the error, if `put_file` fails, are printed to this machine's own local log any more — both go out purely as `Message::send_log` broadcasts, via the `state.log_to_udp` helper. If you want to watch a distribution happen, [Monitoring](./monitoring.md) is where to look, not the serial console.
+
+## Wiring it into `embassy_main`
+
+`distribute_file` is spawned once, like every other background task:
+
+```rust
+match distribute_file(state) {
+    Ok(t) => spawner.spawn(t),
+    Err(e) => log_error!("Spawn Error: {e}"),
+}
+```
 
 ## The outbound PUT client
 

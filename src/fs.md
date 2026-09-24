@@ -2,7 +2,7 @@
 
 The last primitive we need before we can wire everything together is a filesystem: machines need to save uploaded `.gcode` files, read them back to check whether a job is printable, and hand them off to Marlin to actually print. This chapter gets us reading and writing a file on the USB stick from Rust. Stage gate: **write a file from Rust, flash, and see it appear on the USB stick.**
 
-> This module started out as a direct binding to ChanFS (the [original commit](https://github.com/jamesgopsill/derusting/commit/db7bd16bde8df361ca4ad35d5dd97fcb00fb1a7a)) before settling on the friendlier `stdio`-style shim below — the Buddy firmware happens to expose both.
+> This module started out as a direct binding to ChanFS before settling on the friendlier `stdio`-style shim below — the Buddy firmware happens to expose both.
 
 ## The firmware already gives us a filesystem
 
@@ -130,6 +130,10 @@ match fs::stat(c"/usb/firmware.bbf") {
 ```
 
 That's a nice minimal confirmation that the USB stick is mounted and readable at all, before we get to writing anything ourselves.
+
+## Cleaning up on boot
+
+There's a second, less obvious filesystem action that happens on every boot, before any task or UDP/TCP socket is up: `derusting_main()` calls `clean_usb()`, which walks the USB stick and deletes any leftover `*.gcode` and `*.partial` files. If the machine loses power or reboots mid-upload, a `.partial` file for a job that was never finished would otherwise sit on the stick indefinitely; a completed `.gcode` file, meanwhile, is expected to have already been claimed and printed or removed by the ledger before a reboot, so any that remain are stale too. `clean_usb()` just clears both categories out so a fresh boot always starts from a known-empty job set, rather than risk an old or half-written file being mistaken for a valid pending job.
 
 > [!NOTE]
 > The `fs::test_file()` call added above is a manual stage-gate check, not part of the ongoing source — nothing in the current `lib.rs` calls it. Once you've seen it work, remove (or comment out) that call before moving on to later chapters, the same way [Marlin](./marlin.md) has you remove its own manual `home()` test call once it's proven the gcode path works.

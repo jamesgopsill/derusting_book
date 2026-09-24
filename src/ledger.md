@@ -30,29 +30,31 @@ Back in [File Upload](./upload.md), we left a placeholder in `handle_conn` for a
 
 ```rust
 if info.guid.is_none() {
-    append_to_ledger(guid, address_book, ledger, udp).await;
-    distribute_file(guid, address_book, udp).await;
+    // New file to the system so we alert everyone else
+    append_to_ledger(guid, state).await;
+    // Push it onto the distribute_file channel — covered in File Share.
+    if state.files_to_distribute.try_send(guid).is_err() {
+        state.log_to_udp("Error sending on channel").await;
+    };
 }
 ```
 
 `append_to_ledger` is the piece that actually gets a job onto the ledger — updating it directly if this machine already owns it, or alerting the network otherwise:
 
 ```rust
-async fn append_to_ledger<const N1: usize, const N2: usize>(
-    guid: Uuid,
-    address_book: &AddressBook<N1>,
-    ledger: &JobLedger,
-    udp: &UdpSocket<N2>,
-) {
-    let address_book_is_empty = address_book.lock().await.is_empty();
+async fn append_to_ledger(guid: Uuid, state: &'static DerustingState) {
+    let address_book_is_empty = {
+        let guard = state.addresses.lock().await;
+        guard.is_empty()
+    };
 
     let is_owner = {
-        let mut guard = ledger.lock().await;
-        if let Some(state) = guard.as_mut()
+        let mut guard = state.jobs.lock().await;
+        if let Some(job_state) = guard.as_mut()
             && let Some(addr) = my_ipaddr()
-            && addr == state.ledger.owner
+            && addr == job_state.ledger.owner
         {
-            let _ = state.ledger.jobs.insert(guid);
+            let _ = job_state.ledger.jobs.insert(guid);
             true
         } else {
             false
@@ -60,7 +62,7 @@ async fn append_to_ledger<const N1: usize, const N2: usize>(
     };
 
     if !is_owner && !address_book_is_empty {
-        Message::send_new_job_alert(guid, udp).await;
+        Message::send_new_job_alert(guid, &state.udp).await;
     }
 }
 ```
@@ -69,7 +71,7 @@ If the machine you uploaded to already owns the ledger, the job is simply added 
 
 ```rust
 if let Payload::NewJob(data) = msg.payload {
-    let mut guard = ledger.lock().await;
+    let mut guard = state.jobs.lock().await;
     if let Some(ledger) = guard.as_mut() {
         let _ = ledger.ledger.jobs.insert(data.guid);
     }
@@ -77,7 +79,7 @@ if let Payload::NewJob(data) = msg.payload {
 }
 
 if let Payload::Ledger(sent_ledger) = msg.payload {
-    let mut l = ledger.lock().await;
+    let mut l = state.jobs.lock().await;
     *l = Some(LedgerState::new(sent_ledger));
     continue;
 }
@@ -91,47 +93,56 @@ This is the task that actually drives everything — creating the ledger if none
 
 ```rust
 #[embassy_executor::task(pool_size = 1)]
-pub async fn manage_ledger(
-    udp: &'static UdpSocket<UDP_CHANNEL_SIZE>,
-    address_book: &'static AddressBook<ADDRESS_BOOK_ENTRIES>,
-    ledger: &'static JobLedger,
-) -> ! {
+pub async fn manage_ledger(state: &'static DerustingState) -> ! {
     Timer::after_secs(20).await; // let the address book populate first
+    let mut observed_ownership = false;
     loop {
         Timer::after_secs(5).await;
-        let Some(my_addr) = my_ipaddr() else { continue; };
-        let book_guard = address_book.lock().await;
-        let mut ledger_guard = ledger.lock().await;
+        let Some(my_addr) = my_ipaddr() else {
+            log_error!("Can't find my IP address");
+            continue;
+        };
 
-        if ledger_guard.is_none() {
+        let addresses_guard = state.addresses.lock().await;
+        let mut jobs_guard = state.jobs.lock().await;
+
+        if jobs_guard.is_none() {
             log_info!("Creating new ledger");
             let ledger = Ledger { owner: my_addr, jobs: FnvIndexSet::new() };
-            let state = LedgerState::new(ledger);
-            *ledger_guard = Some(state);
-            if let Some(ledger_state) = ledger_guard.as_mut() {
-                Message::send_ledger(ledger_state.ledger.clone(), udp).await;
+            let job_state = LedgerState::new(ledger);
+            *jobs_guard = Some(job_state);
+            if let Some(jobs) = jobs_guard.as_mut() {
+                Message::send_ledger(jobs.ledger.clone(), &state.udp).await;
             };
             continue;
         }
 
-        let Some(ledger_state) = ledger_guard.as_mut() else { continue; };
+        let Some(jobs_state) = jobs_guard.as_mut() else { continue; };
 
-        // Take over a stale ledger whose owner has gone quiet.
-        if ledger_state.received.elapsed() > Duration::from_secs(45)
-            && !book_guard.contains_key(&ledger_state.ledger.owner)
-        {
-            if let Some(min_addr) = book_guard.keys().min() {
+        // Take over a stale ledger — purely on elapsed time, regardless of
+        // whether the previous owner is still in the address book.
+        if jobs_state.received.elapsed() > Duration::from_secs(45) {
+            if let Some(min_addr) = addresses_guard.keys().min() {
                 if *min_addr == my_addr {
-                    ledger_state.ledger.owner = my_addr;
+                    jobs_state.ledger.owner = my_addr;
                 }
             } else {
-                ledger_state.ledger.owner = my_addr;
+                jobs_state.ledger.owner = my_addr;
             };
         }
 
+        // Wait one extra 5s cycle after first noticing we own the ledger
+        // before acting on it — gives a just-completed handoff time to
+        // settle so two machines don't race on the same ownership.
+        if jobs_state.is_owner() && !observed_ownership {
+            observed_ownership = true;
+            continue;
+        }
+
         // If it's my turn, and I'm ready and idle, print something.
-        if ledger_state.is_owner() && marlin::is_ready() && marlin::is_idle() {
-            let printable_job = ledger_state.ledger.jobs.iter().find_map(|&guid| {
+        if jobs_state.is_owner() && observed_ownership && marlin::is_ready() && marlin::is_idle() {
+            log_info!("Available for Jobs");
+            let printable_job = jobs_state.ledger.jobs.iter().find_map(|&guid| {
                 let path = make_path(&guid, false);
                 if fs::open(&path, ReadBytes).is_ok() {
                     Some((guid, path))
@@ -143,9 +154,9 @@ pub async fn manage_ledger(
                 match marlin::print(&path, true) {
                     Ok(_) => {
                         marlin::set_offline();
-                        ledger_state.ledger.jobs.remove(&guid);
-                        let msg = format!("Job Accepted: {guid}");
-                        Message::send_log(&msg, udp).await;
+                        jobs_state.ledger.jobs.remove(&guid);
+                        let msg = format!(64; "Job Accepted: {guid}").unwrap();
+                        Message::send_log(&msg, &state.udp).await;
                     }
                     Err(e) => log_error!("Print Error: {e}"),
                 }
@@ -153,15 +164,15 @@ pub async fn manage_ledger(
         }
 
         // Pass the ledger on to the next machine (by IP), or keep it if alone.
-        if ledger_state.is_owner() {
-            if book_guard.is_empty() {
+        if jobs_state.is_owner() && observed_ownership {
+            if addresses_guard.is_empty() {
                 log_info!("It's only me - keeping ledger - and telling everyone.");
-                Message::send_ledger(ledger_state.ledger.clone(), udp).await;
+                Message::send_ledger(jobs_state.ledger.clone(), &state.udp).await;
                 continue;
             }
             let mut next_highest = u8::MAX;
             let mut next_addr = Ipv4Addr::new(255, 255, 255, 255);
-            for addr in book_guard.keys() {
+            for addr in addresses_guard.keys() {
                 let diff = addr.octets()[3].saturating_sub(my_addr.octets()[3]);
                 if diff > 0 && diff < next_highest {
                     next_addr = *addr;
@@ -169,14 +180,15 @@ pub async fn manage_ledger(
                 }
             }
             if next_highest > 0 && next_highest < u8::MAX {
-                ledger_state.ledger.owner = next_addr;
+                jobs_state.ledger.owner = next_addr;
             } else {
                 // No higher IP found — wrap around to the lowest IP in the book.
-                let min_addr = book_guard.keys().min().unwrap();
-                ledger_state.ledger.owner = *min_addr;
+                let min_addr = addresses_guard.keys().min().unwrap();
+                jobs_state.ledger.owner = *min_addr;
             }
 
-            Message::send_ledger(ledger_state.ledger.clone(), udp).await;
+            Message::send_ledger(jobs_state.ledger.clone(), &state.udp).await;
+            observed_ownership = false;
         }
     }
 }
@@ -186,21 +198,42 @@ A few things worth calling out:
 
 - **Bootstrapping**: the *first* machine to have its `manage_ledger` timer fire with no ledger present creates one, owns it, and broadcasts it. Any other machine that later boots and sees a `Ledger` message arrive over UDP just adopts it via `udp_receiver`'s `Payload::Ledger` branch above — it never tries to create its own.
 - **Passing the token**: ownership moves to the *next-highest* IP address in the address book each round, wrapping back around to the lowest once you reach the top — a simple, fully decentralised way to give every machine a turn without anyone keeping a global list of "whose turn is it".
-- **Failover**: if the current owner goes quiet (missing from the address book, and the ledger hasn't been refreshed in 45s), the machine with the lowest IP in the book takes over — so one machine dropping off the network doesn't strand the ledger forever.
+- **Failover**: purely on a timer — if the ledger hasn't been refreshed in 45s, the machine with the lowest IP in the address book takes over, whether or not the previous owner is still reachable. (An earlier version of this logic also required the owner to have actually dropped out of the address book first; that extra check was removed since a live owner refreshes the ledger well within 45s anyway, so the timeout alone is simpler and just as safe in practice.)
+- **A one-cycle grace period**: the first time a machine notices `is_owner()` is true, it doesn't act on it immediately — `observed_ownership` makes it wait one more 5s cycle first. That absorbs the moment right after a handoff, where more than one machine might briefly believe it owns (or is about to own) the ledger, before anyone actually prints or passes it on again.
 - **Printing is gated three ways**: owning the ledger isn't enough on its own — [Marlin](./marlin.md)'s `is_ready()` (the technician toggled the machine `ONLINE`) and `is_idle()` (it's not already printing something else) both have to hold too, and `set_offline()` is called immediately after a successful print so the machine won't grab a second job mid-print.
 
 ## Wiring it into `embassy_main`
 
-`manage_ledger` is spawned alongside the other UDP tasks:
+`jobs` joins `addresses`/`udp`/`tcp`/`files_to_distribute` as the last field on `DerustingState`, and `manage_ledger` is spawned alongside the other tasks:
 
 ```rust
-static JOB_LEDGER: JobLedger = AsyncMutex::new(None);
+pub struct DerustingState {
+    addresses: AddressBook<ADDRESS_BOOK_ENTRIES>,
+    jobs: JobLedger,
+    udp: UdpSocket<UDP_CHANNEL_SIZE>,
+    tcp: TcpListener<MAX_TCP_CONNECTIONS, MAX_TCP_CONNECTION_CHANNEL_SIZE>,
+    files_to_distribute: Channel<ThreadModeRawMutex, Uuid, 4>,
+}
 
-match manage_ledger(udp, address_book, ledger) {
+impl DerustingState {
+    fn new() -> Self {
+        Self {
+            addresses: AsyncMutex::new(LinearMap::new()),
+            jobs: AsyncMutex::new(None),
+            udp: UdpSocket::new(),
+            tcp: TcpListener::new(),
+            files_to_distribute: Channel::new(),
+        }
+    }
+}
+
+match manage_ledger(state) {
     Ok(t) => spawner.spawn(t),
     Err(e) => log_error!("Spawn Error: {e}"),
 }
 ```
+
+That's every field `DerustingState` ends up with by the end of this book — each one introduced exactly where the chapter that needed it first reached for it.
 
 ## Did it work?
 

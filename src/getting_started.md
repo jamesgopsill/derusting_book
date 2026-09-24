@@ -51,7 +51,7 @@ Hooray, you've now entered the world of decentralised manufacturing. No more nee
 The machines are communicating on UDP port `9090` where they broadcast their status and share the job ledger and print files when a user uploads one.
 
 - Address Book: Each machine maintains a list of address of the other machines. Machines periodically publish their status over the wire.
-- Submission Portal: Users can go to the IP address (:8080) of any of the machines where they can submit their jobs to the system. If a machine is busy it will redirect them to another machine to handle the request.
+- Submission Portal: Users can go to the IP address (:8080) of any of the machines to submit their jobs — every machine serves an identical, independent submission portal, so there's no single point of failure to go looking for.
 - Job sharing: Machines share the file amongst one another so it is available on all of their USB sticks for manufacture.
 - Job Ledger: The machines pass around a job ledger and each get an opportunity to pick a job from the ledger to manufacture.
 - OnReady Function: A machine will only take a job if a user has checked the machine and clicked the button to take it online.

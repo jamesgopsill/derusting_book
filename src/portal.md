@@ -51,9 +51,9 @@ pub const INDEX_HTML: &str = formatcp!(
 
 There's no templating, no per-request state, no session — `GET /` always returns the exact same bytes, computed once at build time and baked straight into the firmware image. That has a nice consequence: **every machine's portal is identical and entirely self-contained.** There's no shared "submission service" any of them depend on — each one serves its own copy of the same page from its own firmware, independently of every other machine on the network.
 
-## About that "redirect if busy" idea
+## No redirect-if-busy logic (yet)
 
-If you've read [Getting Started](./getting_started.md), you'll have seen it describe the portal as redirecting you to another machine if the one you're on is busy. As of this chapter's code, that isn't actually implemented — `GET /` always serves the same static page regardless of load, and there's no logic anywhere in `handle_conn` that checks whether the machine is currently printing before serving the form. It's a reasonable next step (and one this book may cover in a future chapter), but don't go looking for it in the current source.
+Some decentralised systems would have a busy machine redirect a visitor to a less-loaded peer. Derusting doesn't do that today — `GET /` always serves the same static page regardless of load, and there's no logic anywhere in `handle_conn` that checks whether the machine is currently printing before serving the form. It's a reasonable next step (and one this book may cover in a future chapter), but don't go looking for it in the current source.
 
 ## Did it work?
 

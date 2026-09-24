@@ -39,7 +39,7 @@ async fn send<const N: usize>(udp: &UdpSocket<N>, msg: Self, repeats: usize) {
             let Some(pbuf) = PacketBuffer::alloc(&msg) else { return; };
             let _ = udp.broadcast(pbuf, UDP_PORT).await;
         }
-        Timer::after_millis(200).await
+        Timer::after_millis(100).await
     }
 }
 ```
@@ -59,7 +59,7 @@ pub fn alloc<T: Serialize>(msg: T) -> Option<Self> {
 }
 ```
 
-`heartbeat` (already introduced in [LWIP UDP](./lwip_udp.md)) is the simplest caller — `Message::send_heartbeat` wraps a one-field `Heartbeat { alive: true }` and sends it once every 2 seconds. `NewJob` and `Ledger` messages ([File Share](./file_share.md) and [Job Ledger](./ledger.md) respectively) are sent 5 times in a row instead of once, since losing one of those matters more than losing a heartbeat.
+`heartbeat` (already introduced in [LWIP UDP](./lwip_udp.md)) is the simplest caller — `Message::send_heartbeat` wraps a one-field `Heartbeat { alive: true }` and sends it once every 2 seconds. `NewJob` and `Ledger` messages ([File Share](./file_share.md) and [Job Ledger](./ledger.md) respectively) are sent 3 times in a row instead of once, since losing one of those matters more than losing a heartbeat.
 
 A fourth sender, `Message::send_log`, broadcasts an arbitrary `&str` (repeated twice) instead of a fixed struct — it's how a machine makes one of its own internal log lines visible to the rest of the network, not just its own local serial console. [File Share](./file_share.md) and [Job Ledger](./ledger.md) both call it at a few key points; [Monitoring](./monitoring.md) is where those broadcasts actually get decoded and printed somewhere you can read them.
 
@@ -69,15 +69,11 @@ A fourth sender, `Message::send_log`, broadcasts an arbitrary `&str` (repeated t
 
 ```rust
 #[embassy_executor::task(pool_size = 1)]
-pub async fn udp_receiver(
-    udp: &'static UdpSocket<UDP_CHANNEL_SIZE>,
-    address_book: &'static AddressBook<ADDRESS_BOOK_ENTRIES>,
-    ledger: &'static JobLedger,
-) {
+pub async fn udp_receiver(state: &'static DerustingState) {
     log_info!("Ready to receive UDP packets");
     let mut history: HistoryBuf<Uuid, 24> = HistoryBuf::new();
     loop {
-        let (addr, packet) = udp.receive().await;
+        let (addr, packet) = state.udp.receive().await;
         log_info!("Received packet from: {addr}");
 
         let Some(msg) = packet.into_iter().next() else { continue; };
@@ -92,7 +88,7 @@ pub async fn udp_receiver(
         history.write(msg.idempotency);
 
         {
-            let mut book = address_book.lock().await;
+            let mut book = state.addresses.lock().await;
             if let Err(e) = book.insert(addr, Instant::now()) {
                 log_error!("Address book error: {e:?}");
             };
@@ -117,10 +113,10 @@ and a second task, `address_book_lifetime_check`, prunes any entry that's gone q
 
 ```rust
 #[embassy_executor::task(pool_size = 1)]
-pub async fn address_book_lifetime_check(address_book: &'static AddressBook<ADDRESS_BOOK_ENTRIES>) {
+pub async fn address_book_lifetime_check(state: &'static DerustingState) {
     loop {
         Timer::after_secs(10).await;
-        let mut book = address_book.lock().await;
+        let mut book = state.addresses.lock().await;
         book.retain(|_k, instant| instant.elapsed().as_secs() < 20);
     }
 }
@@ -128,26 +124,44 @@ pub async fn address_book_lifetime_check(address_book: &'static AddressBook<ADDR
 
 ## Wiring it into `embassy_main`
 
-Both tasks are spawned alongside the `heartbeat` task from [LWIP UDP](./lwip_udp.md), once we have an IP address:
+`addresses` joins `udp` as a field on the shared `DerustingState` introduced back in [LWIP UDP](./lwip_udp.md):
 
 ```rust
-static ADDRESS_BOOK: AddressBook<ADDRESS_BOOK_ENTRIES> = AsyncMutex::new(LinearMap::new());
+pub struct DerustingState {
+    addresses: AddressBook<ADDRESS_BOOK_ENTRIES>,
+    udp: UdpSocket<UDP_CHANNEL_SIZE>,
+    // ...more fields added by later chapters...
+}
 
-match heartbeat(udp) {
+impl DerustingState {
+    fn new() -> Self {
+        Self {
+            addresses: AsyncMutex::new(LinearMap::new()),
+            udp: UdpSocket::new(),
+            // ...
+        }
+    }
+}
+```
+
+Both new tasks are then spawned alongside `heartbeat`, once we have an IP address, all taking the same `state`:
+
+```rust
+match heartbeat(state) {
     Ok(t) => spawner.spawn(t),
     Err(e) => log_error!("Spawn Error: {e}"),
 }
-match address_book_lifetime_check(address_book) {
+match address_book_lifetime_check(state) {
     Ok(t) => spawner.spawn(t),
     Err(e) => log_error!("Spawn Error: {e}"),
 }
-match udp_receiver(udp, address_book, ledger) {
+match udp_receiver(state) {
     Ok(t) => spawner.spawn(t),
     Err(e) => log_error!("Spawn Error: {e}"),
 }
 ```
 
-(`udp_receiver` also takes the job ledger, since two of the three payload kinds affect it — that part is covered in [Job Ledger](./ledger.md). For this chapter you can ignore it.)
+`udp_receiver` also touches the job ledger once it exists (two of the three payload kinds affect it — that part is covered in [Job Ledger](./ledger.md)), via `state.jobs` the same way it reaches for `state.addresses` above. For this chapter you can ignore that part.
 
 ## Did it work?
 

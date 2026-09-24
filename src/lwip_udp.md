@@ -1,7 +1,5 @@
 # Binding LWIP UDP
 
-[Commit](https://github.com/jamesgopsill/derusting/commit/8fc8b4e8066122bdc98ac9396dd2e2ed6fc50e6c)
-
 With an Embassy task up and running (see [Embassy Async Runtime in FreeRTOS](./embassy.md)), we can start giving it something useful to do. The first network primitive derusting needs is UDP: every machine on the network periodically shouts "I'm alive" so the others can build up an address book. This chapter binds a UDP socket and gets that heartbeat printing to the log every couple of seconds — our stage gate here is simple: **see our own machine talking on the wire**.
 
 ## Why not a Rust network stack?
@@ -112,16 +110,32 @@ Incoming datagrams arrive via `_recv`, lwIP's callback, which just forwards the 
 
 ## Wiring it into `embassy_main`
 
-Back in `lib.rs`, `embassy_main` allocates a static `UdpSocket` and binds it on our chosen port:
+Rather than give every task its own separate `static`, derusting collects everything shared across tasks into one struct, `DerustingState`, and hands every task a single `&'static DerustingState` reference instead of its own bespoke set of arguments. `udp` is the first field it needs:
 
 ```rust
 pub const UDP_PORT: u16 = 9090;
+pub const UDP_CHANNEL_SIZE: usize = 12;
 
-static UDP: StaticCell<UdpSocket<UDP_CHANNEL_SIZE>> = StaticCell::new();
+pub struct DerustingState {
+    udp: UdpSocket<UDP_CHANNEL_SIZE>,
+    // ...more fields added by later chapters, as we need them...
+}
+
+impl DerustingState {
+    fn new() -> Self {
+        Self {
+            udp: UdpSocket::new(),
+        }
+    }
+}
+
+static DERUSTING_STATE: StaticCell<DerustingState> = StaticCell::new();
 
 async fn embassy_main(spawner: Spawner) {
-    let udp = UDP.init_with(UdpSocket::<UDP_CHANNEL_SIZE>::new);
-    if udp.bind(UDP_PORT).await.is_err() {
+    let state = DerustingState::new();
+    let state = DERUSTING_STATE.init(state);
+
+    if state.udp.bind(UDP_PORT).await.is_err() {
         log_critical!("UDP failed");
         return;
     };
@@ -135,31 +149,33 @@ async fn embassy_main(spawner: Spawner) {
         Timer::after_secs(1).await;
     }
 
-    match heartbeat(udp) {
+    match heartbeat(state) {
         Ok(t) => spawner.spawn(t),
         Err(e) => log_error!("Spawn Error: {e}"),
     }
 }
 ```
 
+Every later chapter that needs a new piece of shared state — the address book, the job ledger, the TCP listener — adds a field to `DerustingState` rather than declaring another standalone `static`, and every task added from here on takes `state: &'static DerustingState` as its one parameter.
+
 Then, in `tasks/udp.rs`, the `heartbeat` task itself — this is deliberately the simplest task in the whole codebase, and it's our stage gate:
 
 ```rust
 #[embassy_executor::task(pool_size = 1)]
-pub async fn heartbeat(udp: &'static UdpSocket<UDP_CHANNEL_SIZE>) {
+pub async fn heartbeat(state: &'static DerustingState) {
     loop {
         if let Some(addr) = my_ipaddr() {
             log_info!("[{:?}] heartbeat()", addr);
         } else {
             log_info!("[Unknown] heartbeat()");
         }
-        Message::send_heartbeat(udp).await;
+        Message::send_heartbeat(&state.udp).await;
         Timer::after_secs(2).await;
     }
 }
 ```
 
-`Message::send_heartbeat` serialises a small `Heartbeat` payload and calls `udp.broadcast(..)` — the actual message format (`postcard`-encoded, with an idempotency UUID) is covered in [Gossiping](./gossip.md), since it only matters once another machine is listening and parsing it. For now, the log line is enough proof that the socket is live and broadcasting.
+`Message::send_heartbeat` serialises a small `Heartbeat` payload and calls `state.udp.broadcast(..)` — the actual message format (`postcard`-encoded, with an idempotency UUID) is covered in [Gossiping](./gossip.md), since it only matters once another machine is listening and parsing it. For now, the log line is enough proof that the socket is live and broadcasting.
 
 ## Did it work?
 

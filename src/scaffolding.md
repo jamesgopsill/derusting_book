@@ -13,7 +13,7 @@ cargo new --lib <project-name>
 This creates a new rust library crate and git already initialised into it. We then `cd` into the directory and add:
 
 ```bash
-git submodule add https:://github.com/prusa3d/Prusa-Firmware-Buddy.git buddy
+git submodule add https://github.com/prusa3d/Prusa-Firmware-Buddy.git buddy
 ```
 
 This links the Prusa firmware to the `buddy` folder within the repo and is where will be copying our built library into and then building together to form the firmware that will be flashed onto the device.
@@ -38,7 +38,7 @@ python -m venv .venv
 And then activate it and install the necessary dependencies.
 
 ```bash
-source ./venv/bin/activate
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -129,7 +129,7 @@ target_include_directories(firmware PRIVATE .)
 
 target_sources(
   firmware
-  PRIVATE rust_server.cpp
+  PRIVATE libderusting.cpp
 )
 
 file(GLOB RUST_LIBS "./*.a")
@@ -184,38 +184,14 @@ This should be all the `c++` you'll need to do (Apart from defining the extern "
 
 ### The Rust Code
 
-Ok, now we can start our Rust library. In our `src` folder, we will be creating four files:
+Ok, now we can start our Rust library. In our `src` folder, we will be creating three files:
 
-- `free_rtos_alloc.rs`
 - `panic.rs`
 - `log.rs`
 - `lib.rs`
 
-FreeRTOs provides allocation and deallocation of memory on the heap so we can use this to provide `alloc` for our rust code. Create the `free_rtos_alloc.rs` and add the following:
-
-```rust
-use core::alloc::{GlobalAlloc, Layout};
-
-unsafe extern "C" {
-    pub fn pvPortMalloc(size: usize) -> *mut u8;
-    pub fn vPortFree(ptr: *mut u8);
-}
-
-/// Hooking into FreeRTOS allocator to provide alloc.
-pub struct FreeRtosAllocator;
-
-unsafe impl GlobalAlloc for FreeRtosAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        unsafe { pvPortMalloc(layout.size()) }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-        unsafe { vPortFree(ptr) };
-    }
-}
-```
-
-Here, we're exposing the allocate and deallocate functions available in the buddy firmware and hooking them up to a `FreeRtosAllocator` that implements the `GlobalAlloc` trait. We will instantiate this in a moment in our `lib.rs` to provide us with alloc.
+> [!NOTE]
+> An earlier version of this chapter also had you create a `free_rtos_alloc.rs` here, hooking FreeRTOS's `pvPortMalloc`/`vPortFree` up as a `#[global_allocator]` so `alloc` (`String`, `Vec`, `format!`, …) would work in this `#![no_std]` crate. It turned out derusting never actually needs heap allocation — everything fits in fixed-capacity `heapless` types instead — so the allocator was removed again later in the project. We're skipping it here to save you the round trip; `log.rs` below uses `heapless::format!` for exactly this reason.
 
 The next module we will create is `panic.rs`. Our Rust code requires a panic handler if something goes wrong. The compiler will fail and tell us that we need to implement one if it isn't present.
 
@@ -241,7 +217,7 @@ Next is a vital piece of any code and that is the ability to log so we can see t
 ```rust
 use core::ffi::c_char;
 
-use alloc::format;
+use heapless::format;
 
 /// The severity of the log event.
 #[repr(i32)]
@@ -263,9 +239,14 @@ unsafe extern "C" {
 
 /// Our internal log function
 pub fn log(severity: Severity, args: core::fmt::Arguments) {
-    let mut msg = format!("{}", args);
-    msg.push('\0');
-    unsafe { derusting_log_event(severity, msg.as_ptr() as *const _) };
+    // `heapless::format!` is a fallible, fixed-capacity `format!` — no heap
+    // allocator required. 64 bytes is enough for typical log lines; a
+    // message that overflows it is replaced rather than truncated silently.
+    if let Ok(msg) = format!(64; "{}\0", args) {
+        unsafe { derusting_log_event(severity, msg.as_ptr() as *const _) };
+    } else {
+        unsafe { derusting_log_event(severity, c"Message too long...".as_ptr() as *const _) };
+    }
 }
 
 #[macro_export]
@@ -311,16 +292,8 @@ Now we have all we need to allocate memory on the heap, log our activity and pan
 ```rust
 #![no_std]
 
-use crate::free_rtos_alloc::FreeRtosAllocator;
-
-extern crate alloc;
-
-mod free_rtos_alloc;
 mod log;
 mod panic;
-
-#[global_allocator]
-static ALLOCATOR: FreeRtosAllocator = FreeRtosAllocator;
 
 /// # Safety
 /// We will ensure that we call this function in an
@@ -331,7 +304,7 @@ pub unsafe extern "C" fn derusting_main() {
 }
 ```
 
-We need to declare our modules, declare we're using an allocator, instantiate our allocator and then create our `derusting_main()` function which is exposed and not mangled so it can be picked up and linked in with the Buddy firmware.
+We need to declare our modules and then create our `derusting_main()` function which is exposed and not mangled so it can be picked up and linked in with the Buddy firmware.
 
 We should now be good to go to build and flash the firmware onto a Prusa machine!
 
@@ -392,6 +365,9 @@ cd ..
 echo "BUILD FINISHED"
 ```
 
+> [!NOTE]
+> The script above is the bare minimum needed to get `Hello from Rust` flashed. The one checked into the repo (`scripts/build_firmware.sh`) has grown a few more steps since — it takes a required `--bootloader yes|no` argument, bumps FreeRTOS's `configTOTAL_HEAP_SIZE`, passes a couple more CMake flags (see [Buddy Firmware](./buddy.md)), and rsyncs a GUI asset over (added in [Updating the UI](./ui.md)). Compare against the real script if you want the fully up-to-date version rather than reproducing it step by step here.
+
 ## Flashing onto the device
 
 We can now create a script to flash the device on a successful build. Create `scripts/flash.sh` that as:
@@ -402,13 +378,23 @@ probe-rs run --chip STM32F407VG ./buddy/build/mini_release_noboot/firmware
 
 which will do the job of erasing and programming our buddy board with the new firmware.
 
-We can also create a `scripts/build_and_flash.sh` script that combines the two and only flashes the device on a successful build. Since both scripts always run from the repo root (not from inside `scripts/` itself), it needs to reference its siblings with the `scripts/` prefix too:
+We can also create a `scripts/build_and_flash.sh` script that combines the two and only flashes the device on a successful build. Since both scripts always run from the repo root (not from inside `scripts/` itself), it needs to reference its siblings with the `scripts/` prefix too. Note the `--bootloader no` argument — the real `build_firmware.sh` requires it (it exits with a usage message if you don't pass one):
 
 ```bash
-if bash scripts/build_firmware.sh 2>&1 | tee /dev/stderr | grep -q "SUCCESS"; then
+if bash scripts/build_firmware.sh --bootloader no 2>&1 | tee /dev/stderr | grep -q "SUCCESS"; then
   bash scripts/flash.sh
 fi
 ```
+
+### Flashing the bootloader
+
+`flash.sh` above only flashes the firmware itself — it assumes a compatible bootloader is already on the device. The first time you set up a board (or after updating to a bootloader version the current one can't chain-load), you'll also need `scripts/flash_bootloader.sh`:
+
+```bash
+probe-rs download --chip STM32F407VG --binary-format bin --base-address 0x08000000 ./buddy/.dependencies/bootloader-mini-2.6.0/bootloader.bin
+```
+
+This flashes the bootloader binary that the buddy build pulled down as a dependency directly to the start of flash. You normally only need to run this once per board (or after a bootloader version bump) — day-to-day iteration just uses `build_and_flash.sh`.
 
 With that all done. Let's give it a go:
 

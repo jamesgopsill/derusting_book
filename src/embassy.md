@@ -1,7 +1,5 @@
 # Embassy Async Runtime in FreeRTOS
 
-[Commit](https://github.com/jamesgopsill/derusting/commit/f46d4e24490b59a6bfac85c87a2568206e336e4a)
-
 By the end of the [Scaffolding](./scaffolding.md) chapter we had a Rust static library linked into the Buddy firmware, and `derusting_main()` logging a single `Hello from Rust` line before returning. That's fine for a one-shot log line, but everything we build from here on (the UDP heartbeat, the TCP server, background job management) needs to run concurrently, wait on timers, and await I/O — none of which you want to hand-roll with blocking FFI calls sat on the firmware's own boot thread.
 
 This chapter gets an [Embassy](https://embassy.dev/) async executor running as its own dedicated FreeRTOS task. By the end you'll flash the device and watch a task boot, sleep for 5 seconds, and wake back up — our "hello world" for concurrent Rust running inside the firmware.
@@ -32,9 +30,8 @@ embassy-time-queue-utils = "0.3"
 embassy-time-driver = "0.2"
 embassy-time = {
   version = "0.5",
-  features = ["tick-hz-1_000", "generic-queue-8"]
+  features = ["tick-hz-1_000", "generic-queue-32"]
 }
-portable-atomic = "1"
 static_cell = "2"
 ```
 
@@ -44,7 +41,6 @@ We group everything that talks to FreeRTOS directly under a new `free_rtos` modu
 
 ```
 /free_rtos
-  - alloc.rs       # global allocator backed by the FreeRTOS heap
   - bindings.rs     # extern "C" FreeRTOS API bindings
   - executor.rs     # the Embassy executor, driven from inside a FreeRTOS task
   - mod.rs

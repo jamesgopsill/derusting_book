@@ -114,20 +114,22 @@ pub const INDEX_HTML: &str = formatcp!(
 `tasks/tcp.rs` ties it together. `tcp_worker` loops forever, handing each accepted connection to `handle_conn`, which does a minimal parse of the request line and, for a `GET`, responds with `INDEX_HTML`:
 
 ```rust
-#[embassy_executor::task(pool_size = 2)]
-pub async fn tcp_worker(tcp: &'static TcpListener<..>, /* ... */) {
+#[embassy_executor::task(pool_size = MAX_TCP_CONNECTIONS)]
+pub async fn tcp_worker(state: &'static DerustingState) {
     loop {
-        tcp.with_connection(async |conn| {
-            log_info!("New Connection Received");
-            handle_conn(conn, /* ... */).await
-        })
-        .await
+        state
+            .tcp
+            .with_connection(async |conn| {
+                log_info!("New Connection Received");
+                handle_conn(state, conn).await
+            })
+            .await
     }
 }
 
-pub async fn handle_conn<const N1: usize, const N2: usize, const N3: usize>(
+pub async fn handle_conn<const N1: usize>(
+    state: &'static DerustingState,
     conn: Pin<&mut TcpConnection<N1>>,
-    // ...
 ) {
     let Some(pbuf) = conn.as_ref().receive().await else { return; };
     let Some((start_line, headers, body)) = split_request(/* first chunk */) else {
@@ -154,17 +156,32 @@ For this stage gate, focus on the `Method::Get` branch — that's the one that n
 
 ## Wiring it into `embassy_main`
 
+`tcp` joins `udp` as another field on `DerustingState` (introduced back in [LWIP UDP](./lwip_udp.md)):
+
 ```rust
 pub const TCP_PORT: u16 = 8080;
+pub const MAX_TCP_CONNECTIONS: usize = 1;
+pub const MAX_TCP_CONNECTION_CHANNEL_SIZE: usize = 12;
 
-static TCP: StaticCell<TcpListener<MAX_TCP_CONNECTIONS, MAX_TCP_CONNECTION_CHANNEL_SIZE>> =
-    StaticCell::new();
+pub struct DerustingState {
+    udp: UdpSocket<UDP_CHANNEL_SIZE>,
+    tcp: TcpListener<MAX_TCP_CONNECTIONS, MAX_TCP_CONNECTION_CHANNEL_SIZE>,
+    // ...more fields added by later chapters...
+}
+
+impl DerustingState {
+    fn new() -> Self {
+        Self {
+            udp: UdpSocket::new(),
+            tcp: TcpListener::new(),
+        }
+    }
+}
 
 async fn embassy_main(spawner: Spawner) {
     // ...udp bind from the previous chapter...
 
-    let tcp = TCP.init_with(TcpListener::<MAX_TCP_CONNECTIONS, MAX_TCP_CONNECTION_CHANNEL_SIZE>::new);
-    if let Err(err) = tcp.listen(TCP_PORT).await {
+    if let Err(err) = state.tcp.listen(TCP_PORT).await {
         log_critical!("TCP Failed: {err:?}");
         return;
     };
@@ -172,12 +189,16 @@ async fn embassy_main(spawner: Spawner) {
 
     // ...wait for IP...
 
-    match tcp_worker(tcp, udp, address_book, ledger) {
-        Ok(t) => spawner.spawn(t),
-        Err(e) => log_error!("Spawn Error: {e}"),
+    for _i in 0..MAX_TCP_CONNECTIONS {
+        match tcp_worker(state) {
+            Ok(t) => spawner.spawn(t),
+            Err(e) => log_error!("Spawn Error: {e}"),
+        }
     }
 }
 ```
+
+`tcp_worker` is spawned once per allowed connection slot (`MAX_TCP_CONNECTIONS`, currently `1`) rather than once overall — each running copy of the task claims one connection at a time from `state.tcp`'s internal channel, so raising `MAX_TCP_CONNECTIONS` later is just a case of handling more than one upload at a time.
 
 ## Did it work?
 
